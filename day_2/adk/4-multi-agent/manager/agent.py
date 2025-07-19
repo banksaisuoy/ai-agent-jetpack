@@ -1,3 +1,6 @@
+#เป็น agent หลักที่มีความสามารถเรียกใช้agent ตัวอื่นเช่น ตัวที่ 1,2,3  โดย Agent จะเชื่อคำสั่ง  systemp promt มากที่สุด
+#รันคำสั่งไฟล์ Readme บรรทัดที่ 5,7
+
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
 

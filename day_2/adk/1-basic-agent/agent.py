@@ -27,7 +27,7 @@ def add_to_cart(menu: str):
     """
     return "OK"
 
-
+#สร้าง Agent พร้อมกำหนดการทำงานของ Agent
 root_agent = Agent(
     name="neko_restaurant_agent",
     model=model,
@@ -41,3 +41,8 @@ root_agent = Agent(
     """,
     tools=[find_menu_items, get_reservation_slots, add_to_cart],
 )
+
+
+
+
+#ติดตั้ง Lib  กับ พิมใน open inte พิม adk web เเล้วกด makepublic

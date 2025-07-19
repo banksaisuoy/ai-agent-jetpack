@@ -1,3 +1,5 @@
+#รันโดยการคลิกขวาที่โฟเดอร์ 3 เลือก open in int เเล้วพิมพ์คำสั่ง python main.py  
+
 from google.adk.agents import Agent
 from google.adk.tools.tool_context import ToolContext
 
