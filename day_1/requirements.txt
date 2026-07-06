@@ -3,3 +3,7 @@ functions-framework
 google-genai
 python-dotenv
 setuptools<81
+pytest
+pytest-mock
+Flask
+Pillow
