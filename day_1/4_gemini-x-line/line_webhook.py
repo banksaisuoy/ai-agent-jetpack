@@ -42,8 +42,10 @@ from gemini_service import generate_text, image_understanding, document_understa
 # Function สำหรับรับ webhook จาก LINE
 @functions_framework.http
 def webhook_listening(request):
-    # ดึงค่า Signature จาก header
-    signature = request.headers["X-Line-Signature"]
+    # ตรวจสอบและดึงค่า Signature จาก header
+    signature = request.headers.get("X-Line-Signature")
+    if not signature:
+        return "Missing X-Line-Signature", 400
 
     # แปลง request body เป็น text
     body = request.get_data(as_text=True)
@@ -54,63 +56,91 @@ def webhook_listening(request):
         handler.handle(body, signature)
     except InvalidSignatureError:
         print("Invalid signature. Please check your channel access token/channel secret.")
+        return "Invalid signature", 403
+    except Exception as e:
+        print(f"Error handling webhook: {e}")
+        return "Internal Server Error", 500
 
     return "OK"
+
+def _send_error_reply(reply_token):
+    """ส่งข้อความแจ้งเตือนเมื่อเกิดข้อผิดพลาด"""
+    try:
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text="ขออภัยค่ะ ระบบขัดข้องชั่วคราว เมี๊ยว~")],
+            )
+        )
+    except Exception as e:
+        print(f"Failed to send error reply: {e}")
 
 # กรณีข้อความเป็นประเภท Text
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event):
-    # แสดง loading animation ระหว่างประมวลผล
-    line_bot_api.show_loading_animation(
-        ShowLoadingAnimationRequest(chat_id=event.source.user_id)
-    )
-
-    # ส่งข้อความไปให้ Gemini ประมวลผล
-    gemini_reponse = generate_text(event.message.text)
-
-    # ตอบกลับข้อความที่ได้จาก Gemini
-    line_bot_api.reply_message(
-        ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[TextMessage(text=gemini_reponse)],
+    try:
+        # แสดง loading animation ระหว่างประมวลผล
+        line_bot_api.show_loading_animation(
+            ShowLoadingAnimationRequest(chat_id=event.source.user_id)
         )
-    )
+
+        # ส่งข้อความไปให้ Gemini ประมวลผล
+        gemini_response = generate_text(event.message.text)
+
+        # ตอบกลับข้อความที่ได้จาก Gemini
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=gemini_response)],
+            )
+        )
+    except Exception as e:
+        print(f"Error handling text message: {e}")
+        _send_error_reply(event.reply_token)
 
 # กรณีข้อความเป็นรูปภาพ
 @handler.add(MessageEvent, message=ImageMessageContent)
 def handle_image_message(event):
-    # แสดง loading animation ระหว่างประมวลผล
-    line_bot_api.show_loading_animation_with_http_info(
-        ShowLoadingAnimationRequest(chat_id=event.source.user_id)
-    )
-
-    # ดึง binary ของภาพจาก LINE server
-    message_content = line_bot_blob_api.get_message_content(message_id=event.message.id)
-
-    # ส่งไปให้ Gemini วิเคราะห์ภาพ
-    gemini_reponse = image_understanding(message_content)
-
-    # ตอบกลับผลลัพธ์จาก Gemini
-    line_bot_api.reply_message(
-        ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[TextMessage(text=gemini_reponse)],
+    try:
+        # แสดง loading animation ระหว่างประมวลผล
+        line_bot_api.show_loading_animation_with_http_info(
+            ShowLoadingAnimationRequest(chat_id=event.source.user_id)
         )
-    )
+
+        # ดึง binary ของภาพจาก LINE server
+        message_content = line_bot_blob_api.get_message_content(message_id=event.message.id)
+
+        # ส่งไปให้ Gemini วิเคราะห์ภาพ
+        gemini_response = image_understanding(message_content)
+
+        # ตอบกลับผลลัพธ์จาก Gemini
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=gemini_response)],
+            )
+        )
+    except Exception as e:
+        print(f"Error handling image message: {e}")
+        _send_error_reply(event.reply_token)
 
 # กรณีข้อความเป็นไฟล์เอกสาร
 @handler.add(MessageEvent, message=FileMessageContent)
 def handle_file_message(event):
-    # ดึง binary ของไฟล์จาก LINE server
-    doc_content = line_bot_blob_api.get_message_content(message_id=event.message.id)
+    try:
+        # ดึง binary ของไฟล์จาก LINE server
+        doc_content = line_bot_blob_api.get_message_content(message_id=event.message.id)
 
-    # ส่งไปให้ Gemini วิเคราะห์เนื้อหาในเอกสาร
-    gemini_reponse = document_understanding(doc_content)
+        # ส่งไปให้ Gemini วิเคราะห์เนื้อหาในเอกสาร
+        gemini_response = document_understanding(doc_content)
 
-    # ตอบกลับผลลัพธ์จาก Gemini
-    line_bot_api.reply_message(
-        ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[TextMessage(text=gemini_reponse)],
+        # ตอบกลับผลลัพธ์จาก Gemini
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=gemini_response)],
+            )
         )
-    )
+    except Exception as e:
+        print(f"Error handling file message: {e}")
+        _send_error_reply(event.reply_token)
