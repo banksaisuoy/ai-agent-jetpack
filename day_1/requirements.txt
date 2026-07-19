@@ -3,3 +3,7 @@ functions-framework
 google-genai
 python-dotenv
 setuptools<81
+pillow>=10.0.0
+cachetools>=5.0.0
+pytest
+pytest-mock
