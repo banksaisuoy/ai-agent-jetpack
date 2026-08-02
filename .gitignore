@@ -1,8 +1,6 @@
-.env
-__pycache__
-example-product.png
-.venv
 *.pyc
 *.pyo
 *.pyd
 *.db
+
+day_1/5_agent_orchestrator/venv/

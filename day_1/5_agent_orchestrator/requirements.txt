@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+google-adk
+google-generativeai
+line-bot-sdk
+python-dotenv
+httpx
+pydantic-settings
