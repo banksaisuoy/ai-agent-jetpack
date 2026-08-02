@@ -1,155 +1,195 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Agent Simulator</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .chat-container {
-            height: calc(100vh - 180px);
-        }
-        .message {
             max-width: 75%;
             word-wrap: break-word;
+        }
+        .message img {
+            max-width: 100%;
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
         }
     </style>
 </head>
 <body class="bg-gray-100 flex flex-col items-center min-h-screen">
     
-    <div class="w-full max-w-2xl bg-white shadow-xl rounded-xl overflow-hidden mt-6 border border-gray-200">
+    <div class="w-full max-w-2xl bg-white shadow-xl rounded-xl overflow-hidden mt-6 border border-gray-200 flex flex-col flex-1 max-h-[90vh]">
         <!-- Header -->
-        <div class="bg-indigo-600 text-white py-4 px-6 flex items-center justify-between">
+        <div class="bg-indigo-600 text-white py-4 px-6 flex items-center justify-between shrink-0">
             <div class="flex items-center space-x-3">
                 <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl">
                     AI
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold">Neko Assistant</h1>
-                    <p class="text-sm text-indigo-200">Online</p>
-                </div>
-            </div>
         </div>
 
         <!-- Chat Area -->
-        <div id="chatBox" class="chat-container p-6 overflow-y-auto bg-gray-50 flex flex-col space-y-4">
+        <div id="chatBox" class="p-6 overflow-y-auto bg-gray-50 flex flex-col space-y-4 flex-1">
             <!-- Initial AI message -->
             <div class="flex items-start">
                 <div class="bg-white border border-gray-200 text-gray-800 rounded-lg rounded-tl-none px-4 py-3 shadow-sm message">
-                    สวัสดีเมี๊ยว~ มีอะไรให้เนโกะช่วยมั้ยเมี๊ยว~
-                </div>
+            </div>
+        </div>
+
+        <!-- Image Preview Area -->
+        <div id="imagePreviewContainer" class="hidden px-4 pt-2 bg-white border-t border-gray-200">
+            <div class="relative inline-block">
+                <img id="imagePreview" src="#" alt="Preview" class="h-20 w-20 object-cover rounded-lg border border-gray-300">
+                <button type="button" id="removeImageBtn" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600">
+                    &times;
+                </button>
             </div>
         </div>
 
         <!-- Input Area -->
-        <div class="bg-white border-t border-gray-200 p-4">
+        <div class="bg-white border-t border-gray-200 p-4 shrink-0">
             <form id="chatForm" class="flex items-center space-x-2">
+                <input type="file" id="imageInput" accept="image/*" class="hidden">
+                <button type="button" id="uploadBtn" class="text-gray-500 hover:text-indigo-600 transition duration-200 focus:outline-none flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                </button>
                 <input 
                     type="text" 
                     id="userInput" 
                     placeholder="Type a message..." 
                     class="flex-1 border border-gray-300 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    required
                 >
                 <button 
                     type="submit" 
                     id="sendBtn"
-                    class="bg-indigo-600 text-white rounded-full p-2 hover:bg-indigo-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center justify-center w-10 h-10"
+                    class="bg-indigo-600 text-white rounded-full p-2 hover:bg-indigo-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center justify-center w-10 h-10 flex-shrink-0"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                    </svg>
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <script>
-        const chatForm = document.getElementById('chatForm');
         const userInput = document.getElementById('userInput');
         const chatBox = document.getElementById('chatBox');
         const sendBtn = document.getElementById('sendBtn');
+        const imageInput = document.getElementById('imageInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+        const imagePreview = document.getElementById('imagePreview');
+        const removeImageBtn = document.getElementById('removeImageBtn');
 
-        function appendMessage(text, isUser) {
+        let selectedImageFile = null;
+
+        uploadBtn.addEventListener('click', () => {
+            imageInput.click();
+        });
+
+        imageInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                selectedImageFile = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreviewContainer.classList.remove('hidden');
+                };
+                reader.readAsDataURL(selectedImageFile);
+            }
+        });
+
+        removeImageBtn.addEventListener('click', () => {
+            selectedImageFile = null;
+            imageInput.value = '';
+            imagePreviewContainer.classList.add('hidden');
+            imagePreview.src = '#';
+        });
+
+        function appendMessage(text, isUser, imageUrl = null) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex ${isUser ? 'justify-end' : 'items-start'}`;
             
-            const messageDiv = document.createElement('div');
             messageDiv.className = isUser 
                 ? 'bg-indigo-600 text-white rounded-lg rounded-tr-none px-4 py-3 shadow-sm message'
                 : 'bg-white border border-gray-200 text-gray-800 rounded-lg rounded-tl-none px-4 py-3 shadow-sm message';
-            messageDiv.textContent = text;
             
-            wrapper.appendChild(messageDiv);
-            chatBox.appendChild(wrapper);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        function appendLoading() {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex items-start';
-            wrapper.id = 'loadingIndicator';
-            
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'bg-white border border-gray-200 text-gray-500 rounded-lg rounded-tl-none px-4 py-3 shadow-sm message italic flex items-center space-x-2';
-            messageDiv.innerHTML = `
-                <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
-                <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
-            `;
-            
-            wrapper.appendChild(messageDiv);
-            chatBox.appendChild(wrapper);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        function removeLoading() {
-            const loadingIndicator = document.getElementById('loadingIndicator');
-            if (loadingIndicator) {
-                loadingIndicator.remove();
+            if (imageUrl) {
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                messageDiv.appendChild(img);
             }
-        }
 
+            if (text) {
+                const textDiv = document.createElement('div');
+                textDiv.textContent = text;
+                messageDiv.appendChild(textDiv);
+            }
+            
+            wrapper.appendChild(messageDiv);
+            chatBox.appendChild(wrapper);
         chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const text = userInput.value.trim();
-            if (!text) return;
+            const hasImage = !!selectedImageFile;
 
-            // 1. Add user message
-            appendMessage(text, true);
+            if (!text && !hasImage) return;
+
+            // Save the file reference before resetting UI
+            const fileToSend = selectedImageFile;
+
+            // Add user message
+            let imageUrl = null;
+            if (hasImage) {
+                imageUrl = URL.createObjectURL(fileToSend);
+            }
+            appendMessage(text, true, imageUrl);
+            
             userInput.value = '';
             
             // Disable input while waiting
             userInput.disabled = true;
             sendBtn.disabled = true;
+            uploadBtn.disabled = true;
+            
+            // Clear image preview UI now that message is shown
+            selectedImageFile = null;
+            imageInput.value = '';
+            imagePreviewContainer.classList.add('hidden');
+            imagePreview.src = '#';
 
-            // 2. Add loading indicator
+            // Add loading indicator
             appendLoading();
 
             try {
-                // 3. Send request
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
-                });
+                let response;
+                
+                if (hasImage) {
+                    const formData = new FormData();
+                    formData.append('image', fileToSend);
+                    if (text) {
+                        formData.append('text', text);
+                    }
+                    
+                    response = await fetch('/api/chat/image', {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
+                    });
+                }
                 
                 removeLoading();
                 
-                if (response.ok) {
                     const data = await response.json();
                     appendMessage(data.reply || "No response", false);
                 } else {
-                    appendMessage("❌ Error connecting to server.", false);
+                    try {
+                        const errorData = await response.json();
+                        appendMessage(`❌ Error: ${errorData.error || 'Server error'}`, false);
+                    } catch (e) {
+                        appendMessage("❌ Error connecting to server.", false);
+                    }
                 }
             } catch (error) {
                 console.error("Chat error:", error);
-                removeLoading();
-                appendMessage("❌ Network error.", false);
-            } finally {
                 // Re-enable input
                 userInput.disabled = false;
                 sendBtn.disabled = false;
+                uploadBtn.disabled = false;
+                if (imageUrl) {
+                    URL.revokeObjectURL(imageUrl);
+                }
                 userInput.focus();
             }
         });
