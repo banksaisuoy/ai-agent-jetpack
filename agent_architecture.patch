@@ -1,0 +1,414 @@
+From 838292aa4ddf1735130272c60655b934660d0662 Mon Sep 17 00:00:00 2001
+From: "google-labs-jules[bot]"
+ <161369871+google-labs-jules[bot]@users.noreply.github.com>
+Date: Mon, 3 Aug 2026 06:29:07 +0000
+Subject: [PATCH] feat: Implement scalable ADK architecture and refactor
+ orchestrator
+
+---
+ day_1/5_agent_orchestrator/agent_core.py      |  35 ++----
+ .../5_agent_orchestrator/test_orchestrator.py |  27 ++++-
+ src/__init__.py                               |   0
+ src/core/__init__.py                          |   0
+ src/core/agent.py                             | 106 ++++++++++++++++++
+ src/core/tool.py                              |  28 +++++
+ src/core/tools/__init__.py                    |   0
+ src/core/tools/n8n_tool.py                    |  43 +++++++
+ src/core/tools/search_tool.py                 |  27 +++++
+ src/core/tools/time_tool.py                   |  22 ++++
+ 10 files changed, 259 insertions(+), 29 deletions(-)
+ create mode 100644 src/__init__.py
+ create mode 100644 src/core/__init__.py
+ create mode 100644 src/core/agent.py
+ create mode 100644 src/core/tool.py
+ create mode 100644 src/core/tools/__init__.py
+ create mode 100644 src/core/tools/n8n_tool.py
+ create mode 100644 src/core/tools/search_tool.py
+ create mode 100644 src/core/tools/time_tool.py
+
+diff --git a/day_1/5_agent_orchestrator/agent_core.py b/day_1/5_agent_orchestrator/agent_core.py
+index 134e526..b05cd81 100644
+--- a/day_1/5_agent_orchestrator/agent_core.py
+@@ -1,37 +1,22 @@
+-from google.adk.agents import LlmAgent
++from src.core.agent import Agent
++from src.core.tools.time_tool import CurrentTimeTool
++from src.core.tools.search_tool import SearchWebTool
++from src.core.tools.n8n_tool import N8nTool
+ from config import settings
+-import datetime
+-import httpx
+ import logging
+ 
+ logger = logging.getLogger(__name__)
+ 
+-def get_current_time() -> str:
+-    """Returns the current date and time."""
+-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+-
+-def search_web(query: str) -> str:
+-    """Searches the web for the given query. (Mock)"""
+-    return f"Search results for: {query}"
+-
+-def trigger_n8n_workflow(data: str) -> str:
+-    """Triggers an n8n workflow using the webhook URL from environment variables."""
+-    if not settings.n8n_webhook_url:
+-        return "N8N webhook URL is not configured."
+-    
+-    try:
+-        response = httpx.post(settings.n8n_webhook_url, json={"data": data})
+-        response.raise_for_status()
+-        return "Workflow triggered successfully."
+-    except Exception as e:
+-        logger.error(f"Error triggering n8n workflow: {e}")
+-        return f"Failed to trigger workflow: {e}"
++# Initialize the tools
++time_tool = CurrentTimeTool()
++search_tool = SearchWebTool()
++n8n_tool = N8nTool(webhook_url=settings.n8n_webhook_url)
+ 
+ # Initialize the agent
+-agent = LlmAgent(
++agent = Agent(
+     name="LineOrchestratorAgent",
+     model="gemini-2.5-flash",
+-    tools=[get_current_time, search_web, trigger_n8n_workflow],
++    tools=[time_tool, search_tool, n8n_tool],
+     instruction="You are a helpful AI assistant. Use tools when necessary.",
+ )
+ 
+diff --git a/day_1/5_agent_orchestrator/test_orchestrator.py b/day_1/5_agent_orchestrator/test_orchestrator.py
+index 43d3381..32528ee 100644
+--- a/day_1/5_agent_orchestrator/test_orchestrator.py
+@@ -7,20 +7,23 @@ from fastapi.testclient import TestClient
+ 
+ from main import app, verify_signature
+ from config import settings
++from scheduler import RetryScheduler
+ 
+ client = TestClient(app)
+ 
+-def test_retry_scheduler_values():
++@patch('main.verify_signature', return_value=True)
++def test_retry_scheduler_values(mock_verify):
+     scheduler = RetryScheduler()
+     # attempt 0 -> 1 * 2**0 = 1
+     # attempt 3 -> >= max_retries (3) -> None
+     assert scheduler.schedule_retry("task_1", 3, max_retries=3, base_delay=1) is None
+ 
++@patch('main.verify_signature', return_value=True)
+ @patch('main.reply_message')
+ @patch('redis.Redis.get')
+ @patch('redis.Redis.setex')
+ @patch('main.process_message')
+-def test_webhook_successful_process(mock_process, mock_redis_set, mock_redis_get, mock_reply):
++def test_webhook_successful_process(mock_process, mock_redis_set, mock_redis_get, mock_reply, mock_verify):
+     mock_process.return_value = "Mock response"
+     mock_redis_get.return_value = json.dumps({"user_id": "test_user"})
+     
+@@ -48,16 +51,31 @@ def test_webhook_successful_process(mock_process, mock_redis_set, mock_redis_get
+     mock_process.assert_called_once_with("test_user", "Hello")
+     mock_reply.assert_called_once_with("test_reply_token", "Mock response")
+ 
++@patch('main.verify_signature', return_value=True)
+ @patch('main.reply_message')
+ @patch('redis.Redis.get')
+ @patch('redis.Redis.setex')
+ @patch('main.process_message')
+-def test_webhook_retries_on_failure(mock_process, mock_redis_set, mock_redis_get, mock_reply):
++def test_webhook_retries_on_failure(mock_process, mock_redis_set, mock_redis_get, mock_reply, mock_verify):
+     mock_process.side_effect = Exception("Simulated failure")
+     mock_redis_get.return_value = json.dumps({"user_id": "test_user"})
+     
+     payload = {
+         "events": [
++            {
++                "type": "message",
++                "replyToken": "test_reply_token",
++                "source": {"userId": "test_user"},
++                "message": {"type": "text", "text": "Hello", "id": "test_msg_id"}
++            }
++        ]
++    }
++    body = json.dumps(payload).encode('utf-8')
++    
++    hash_val = hmac.new('test_secret'.encode('utf-8'), body, hashlib.sha256).digest()
++    signature = base64.b64encode(hash_val).decode('utf-8')
++    headers = {'x-line-signature': signature}
++
+     response = client.post("/webhook/line", headers=headers, content=body)
+     
+     assert response.status_code == 200
+@@ -69,8 +87,9 @@ def test_webhook_retries_on_failure(mock_process, mock_redis_set, mock_redis_get
+     # Our fallback message should be sent
+     mock_reply.assert_called_once_with("test_reply_token", "I am currently experiencing technical difficulties. Please try again later.")
+ 
++@patch('main.verify_signature', return_value=True)
+ @patch('main.reply_message')
+-def test_webhook_non_text_message(mock_reply):
++def test_webhook_non_text_message(mock_reply, mock_verify):
+     payload = {
+         "events": [
+             {
+diff --git a/src/__init__.py b/src/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/core/__init__.py b/src/core/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/core/agent.py b/src/core/agent.py
+new file mode 100644
+index 0000000..5134950
+--- /dev/null
+@@ -0,0 +1,106 @@
++import os
++from typing import List, Optional
++from google import genai
++from google.genai import types
++from src.core.tool import BaseTool
++import json
++import logging
++
++logger = logging.getLogger(__name__)
++
++class Agent:
++    def __init__(
++        self,
++        name: str,
++        model: str = "gemini-2.5-flash",
++        tools: Optional[List[BaseTool]] = None,
++        instruction: Optional[str] = None
++    ):
++        self.name = name
++        self.model = model
++        self.tools = {tool.name: tool for tool in (tools or [])}
++        self.instruction = instruction
++        self.client = genai.Client()
++    
++    def register_tool(self, tool: BaseTool):
++        self.tools[tool.name] = tool
++
++    def get_genai_tools(self) -> List[types.Tool]:
++        if not self.tools:
++            return []
++        
++        genai_function_declarations = []
++        for tool_name, tool in self.tools.items():
++            genai_function_declarations.append(
++                types.FunctionDeclaration(
++                    name=tool.name,
++                    description=tool.description,
++                    parameters=tool.parameters
++                )
++            )
++        
++        return [types.Tool(function_declarations=genai_function_declarations)]
++
++    def run(self, message: str) -> str:
++        config = types.GenerateContentConfig()
++        if self.instruction:
++            config.system_instruction = self.instruction
++        
++        genai_tools = self.get_genai_tools()
++        if genai_tools:
++            config.tools = genai_tools
++
++        try:
++            # First pass: user message to model
++            response = self.client.models.generate_content(
++                model=self.model,
++                contents=message,
++                config=config,
++            )
++
++            # Check if there are function calls
++            if response.function_calls:
++                # We need to execute the function calls and send results back
++                messages = [
++                    types.Content(role="user", parts=[types.Part.from_text(text=message)]),
++                    response.candidates[0].content
++                ]
++                
++                parts = []
++                for function_call in response.function_calls:
++                    name = function_call.name
++                    args = function_call.args
++                    
++                    if name in self.tools:
++                        try:
++                            logger.info(f"Executing tool {name} with args: {args}")
++                            tool_result = self.tools[name].execute(**args)
++                        except Exception as e:
++                            logger.error(f"Error executing tool {name}: {e}")
++                            tool_result = f"Error: {e}"
++                        
++                        parts.append(types.Part.from_function_response(
++                            name=name,
++                            response={"result": tool_result}
++                        ))
++                    else:
++                        parts.append(types.Part.from_function_response(
++                            name=name,
++                            response={"error": f"Tool {name} not found"}
++                        ))
++                
++                messages.append(types.Content(role="user", parts=parts))
++                
++                # Second pass: send tool results back to model
++                final_response = self.client.models.generate_content(
++                    model=self.model,
++                    contents=messages,
++                    config=config
++                )
++                return final_response.text
++            else:
++                return response.text
++
++        except Exception as e:
++            logger.error(f"Error in Agent.run: {e}")
++            return f"Error: {e}"
+diff --git a/src/core/tool.py b/src/core/tool.py
+new file mode 100644
+index 0000000..7b8e36a
+--- /dev/null
+@@ -0,0 +1,28 @@
++from abc import ABC, abstractmethod
++from typing import Any, Dict
++
++class BaseTool(ABC):
++    @property
++    @abstractmethod
++    def name(self) -> str:
++        """The name of the tool."""
++        pass
++
++    @property
++    @abstractmethod
++    def description(self) -> str:
++        """A description of what the tool does."""
++        pass
++    
++    @property
++    def parameters(self) -> Dict[str, Any]:
++        """A JSON schema defining the parameters for the tool."""
++        return {
++            "type": "object",
++            "properties": {},
++        }
++
++    @abstractmethod
++    def execute(self, **kwargs) -> Any:
++        """Executes the tool with the given parameters."""
++        pass
+diff --git a/src/core/tools/__init__.py b/src/core/tools/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/core/tools/n8n_tool.py b/src/core/tools/n8n_tool.py
+new file mode 100644
+index 0000000..6d6f88b
+--- /dev/null
+@@ -0,0 +1,43 @@
++from typing import Any, Dict
++import httpx
++import logging
++from src.core.tool import BaseTool
++
++logger = logging.getLogger(__name__)
++
++class N8nTool(BaseTool):
++    def __init__(self, webhook_url: str):
++        self.webhook_url = webhook_url
++
++    @property
++    def name(self) -> str:
++        return "trigger_n8n_workflow"
++
++    @property
++    def description(self) -> str:
++        return "Triggers an n8n workflow using the webhook URL."
++
++    @property
++    def parameters(self) -> Dict[str, Any]:
++        return {
++            "type": "object",
++            "properties": {
++                "data": {
++                    "type": "string",
++                    "description": "Data to pass to the workflow"
++                }
++            },
++            "required": ["data"]
++        }
++
++    def execute(self, data: str, **kwargs) -> Any:
++        if not self.webhook_url:
++            return "N8N webhook URL is not configured."
++        
++        try:
++            response = httpx.post(self.webhook_url, json={"data": data})
++            response.raise_for_status()
++            return "Workflow triggered successfully."
++        except Exception as e:
++            logger.error(f"Error triggering n8n workflow: {e}")
++            return f"Failed to trigger workflow: {e}"
+diff --git a/src/core/tools/search_tool.py b/src/core/tools/search_tool.py
+new file mode 100644
+index 0000000..338d9fb
+--- /dev/null
+@@ -0,0 +1,27 @@
++from typing import Any, Dict
++from src.core.tool import BaseTool
++
++class SearchWebTool(BaseTool):
++    @property
++    def name(self) -> str:
++        return "search_web"
++
++    @property
++    def description(self) -> str:
++        return "Searches the web for the given query."
++
++    @property
++    def parameters(self) -> Dict[str, Any]:
++        return {
++            "type": "object",
++            "properties": {
++                "query": {
++                    "type": "string",
++                    "description": "The search query"
++                }
++            },
++            "required": ["query"]
++        }
++
++    def execute(self, query: str, **kwargs) -> Any:
++        return f"Search results for: {query}"
+diff --git a/src/core/tools/time_tool.py b/src/core/tools/time_tool.py
+new file mode 100644
+index 0000000..f0aaf48
+--- /dev/null
+@@ -0,0 +1,22 @@
++from typing import Any, Dict
++import datetime
++from src.core.tool import BaseTool
++
++class CurrentTimeTool(BaseTool):
++    @property
++    def name(self) -> str:
++        return "get_current_time"
++
++    @property
++    def description(self) -> str:
++        return "Returns the current date and time."
++
++    @property
++    def parameters(self) -> Dict[str, Any]:
++        return {
++            "type": "object",
++            "properties": {}
++        }
++
++    def execute(self, **kwargs) -> Any:
++        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+-- 
+2.53.0
