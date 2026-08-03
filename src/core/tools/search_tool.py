@@ -1,27 +1,17 @@
-from typing import Any, Dict
-from src.core.tool import BaseTool
-
-class SearchWebTool(BaseTool):
-    @property
-    def name(self) -> str:
-        return "search_web"
-
-    @property
-    def description(self) -> str:
-        return "Searches the web for the given query."
-
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query"
-                }
-            },
             "required": ["query"]
         }
 
-    def execute(self, query: str, **kwargs) -> Any:
-        return f"Search results for: {query}"
+    def execute(self, query: str = "", **kwargs) -> Any:
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
+            
+        if query == "simulate_api_failure":
+            raise Exception("API failure")
+            
+        return {
+            "query": query,
+            "results": [
+                {"title": f"Result 1 for {query}", "url": "http://example.com/1"},
+                {"title": f"Result 2 for {query}", "url": "http://example.com/2"}
+            ]
+        }
